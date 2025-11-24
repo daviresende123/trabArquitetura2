@@ -4,7 +4,7 @@ Implementa memória RAM com endereçamento de 16 bits e palavras de 32 bits.
 """
 
 
-class Memory:
+class Memoria:
     """
     Classe que representa a memória do processador UFLA-RISC.
     
@@ -15,23 +15,23 @@ class Memory:
     """
     
     # Constantes
-    MEMORY_SIZE = 65536  # 2^16 endereços
-    WORD_SIZE = 32  # bits por palavra
-    MAX_ADDRESS = MEMORY_SIZE - 1
-    MAX_VALUE = 0xFFFFFFFF  # Valor máximo de 32 bits
+    TAMANHO_MEMORIA = 65536  # 2^16 endereços
+    TAMANHO_PALAVRA = 32  # bits por palavra
+    ENDERECO_MAXIMO = TAMANHO_MEMORIA - 1
+    VALOR_MAXIMO = 0xFFFFFFFF  # Valor máximo de 32 bits
     
     def __init__(self):
         """
         Inicializa a memória com todos os endereços zerados.
         """
-        self.memory = [0] * self.MEMORY_SIZE
+        self.memoria = [0] * self.TAMANHO_MEMORIA
     
-    def read(self, address: int) -> int:
+    def ler(self, endereco: int) -> int:
         """
         Lê uma palavra de 32 bits do endereço especificado.
         
         Args:
-            address: Endereço de memória (0 a 65535)
+            endereco: Endereço de memória (0 a 65535)
             
         Returns:
             Valor de 32 bits armazenado no endereço
@@ -40,138 +40,138 @@ class Memory:
             ValueError: Se o endereço estiver fora do range válido
             TypeError: Se o endereço não for um inteiro
         """
-        if not isinstance(address, int):
-            raise TypeError(f"Endereço deve ser um inteiro, recebido: {type(address).__name__}")
+        if not isinstance(endereco, int):
+            raise TypeError(f"Endereço deve ser um inteiro, recebido: {type(endereco).__name__}")
         
-        if address < 0 or address > self.MAX_ADDRESS:
+        if endereco < 0 or endereco > self.ENDERECO_MAXIMO:
             raise ValueError(
                 f"Endereço fora do range válido. "
-                f"Esperado: 0-{self.MAX_ADDRESS}, recebido: {address}"
+                f"Esperado: 0-{self.ENDERECO_MAXIMO}, recebido: {endereco}"
             )
         
-        return self.memory[address]
+        return self.memoria[endereco]
     
-    def write(self, address: int, data: int):
+    def escrever(self, endereco: int, dado: int):
         """
         Escreve uma palavra de 32 bits no endereço especificado.
         
         Args:
-            address: Endereço de memória (0 a 65535)
-            data: Valor de 32 bits a ser armazenado
+            endereco: Endereço de memória (0 a 65535)
+            dado: Valor de 32 bits a ser armazenado
             
         Raises:
             ValueError: Se o endereço estiver fora do range válido
             TypeError: Se o endereço ou dados não forem inteiros
         """
-        if not isinstance(address, int):
-            raise TypeError(f"Endereço deve ser um inteiro, recebido: {type(address).__name__}")
+        if not isinstance(endereco, int):
+            raise TypeError(f"Endereço deve ser um inteiro, recebido: {type(endereco).__name__}")
         
-        if not isinstance(data, int):
-            raise TypeError(f"Dados devem ser um inteiro, recebido: {type(data).__name__}")
+        if not isinstance(dado, int):
+            raise TypeError(f"Dados devem ser um inteiro, recebido: {type(dado).__name__}")
         
-        if address < 0 or address > self.MAX_ADDRESS:
+        if endereco < 0 or endereco > self.ENDERECO_MAXIMO:
             raise ValueError(
                 f"Endereço fora do range válido. "
-                f"Esperado: 0-{self.MAX_ADDRESS}, recebido: {address}"
+                f"Esperado: 0-{self.ENDERECO_MAXIMO}, recebido: {endereco}"
             )
         
         # Garante que o valor está dentro do range de 32 bits (sem sinal)
         # Usa máscara para manter apenas os 32 bits menos significativos
-        self.memory[address] = data & self.MAX_VALUE
+        self.memoria[endereco] = dado & self.VALOR_MAXIMO
     
-    def load_program(self, instructions: list, start_address: int = 0):
+    def carregar_programa(self, instrucoes: list, endereco_inicial: int = 0):
         """
         Carrega uma lista de instruções na memória a partir do endereço inicial.
         
         Args:
-            instructions: Lista de instruções (inteiros de 32 bits)
-            start_address: Endereço inicial para carregar o programa (padrão: 0)
+            instrucoes: Lista de instruções (inteiros de 32 bits)
+            endereco_inicial: Endereço inicial para carregar o programa (padrão: 0)
             
         Raises:
             ValueError: Se o programa não couber na memória ou endereço inválido
-            TypeError: Se instructions não for uma lista ou start_address não for inteiro
+            TypeError: Se instrucoes não for uma lista ou endereco_inicial não for inteiro
         """
-        if not isinstance(instructions, list):
+        if not isinstance(instrucoes, list):
             raise TypeError(
-                f"Instructions deve ser uma lista, recebido: {type(instructions).__name__}"
+                f"Instruções devem ser uma lista, recebido: {type(instrucoes).__name__}"
             )
         
-        if not isinstance(start_address, int):
+        if not isinstance(endereco_inicial, int):
             raise TypeError(
-                f"start_address deve ser um inteiro, recebido: {type(start_address).__name__}"
+                f"endereco_inicial deve ser um inteiro, recebido: {type(endereco_inicial).__name__}"
             )
         
-        if start_address < 0 or start_address > self.MAX_ADDRESS:
+        if endereco_inicial < 0 or endereco_inicial > self.ENDERECO_MAXIMO:
             raise ValueError(
                 f"Endereço inicial fora do range válido. "
-                f"Esperado: 0-{self.MAX_ADDRESS}, recebido: {start_address}"
+                f"Esperado: 0-{self.ENDERECO_MAXIMO}, recebido: {endereco_inicial}"
             )
         
-        end_address = start_address + len(instructions) - 1
+        endereco_final = endereco_inicial + len(instrucoes) - 1
         
-        if end_address > self.MAX_ADDRESS:
+        if endereco_final > self.ENDERECO_MAXIMO:
             raise ValueError(
                 f"Programa não cabe na memória. "
-                f"Endereço final seria {end_address}, máximo permitido: {self.MAX_ADDRESS}"
+                f"Endereço final seria {endereco_final}, máximo permitido: {self.ENDERECO_MAXIMO}"
             )
         
         # Carrega cada instrução na memória
-        for i, instruction in enumerate(instructions):
-            if not isinstance(instruction, int):
+        for i, instrucao in enumerate(instrucoes):
+            if not isinstance(instrucao, int):
                 raise TypeError(
                     f"Instrução no índice {i} deve ser um inteiro, "
-                    f"recebido: {type(instruction).__name__}"
+                    f"recebido: {type(instrucao).__name__}"
                 )
-            self.write(start_address + i, instruction)
+            self.escrever(endereco_inicial + i, instrucao)
     
-    def dump(self, start: int, end: int) -> dict:
+    def dump(self, inicio: int, fim: int) -> dict:
         """
         Retorna um dump (cópia) da memória entre os endereços especificados.
         
         Args:
-            start: Endereço inicial (inclusivo)
-            end: Endereço final (inclusivo)
+            inicio: Endereço inicial (inclusivo)
+            fim: Endereço final (inclusivo)
             
         Returns:
             Dicionário com endereços como chaves e valores como valores
-            Formato: {address: value, ...}
+            Formato: {endereco: valor, ...}
             
         Raises:
-            ValueError: Se os endereços forem inválidos ou start > end
-            TypeError: Se start ou end não forem inteiros
+            ValueError: Se os endereços forem inválidos ou inicio > fim
+            TypeError: Se inicio ou fim não forem inteiros
         """
-        if not isinstance(start, int):
-            raise TypeError(f"start deve ser um inteiro, recebido: {type(start).__name__}")
+        if not isinstance(inicio, int):
+            raise TypeError(f"inicio deve ser um inteiro, recebido: {type(inicio).__name__}")
         
-        if not isinstance(end, int):
-            raise TypeError(f"end deve ser um inteiro, recebido: {type(end).__name__}")
+        if not isinstance(fim, int):
+            raise TypeError(f"fim deve ser um inteiro, recebido: {type(fim).__name__}")
         
-        if start < 0 or start > self.MAX_ADDRESS:
+        if inicio < 0 or inicio > self.ENDERECO_MAXIMO:
             raise ValueError(
                 f"Endereço inicial fora do range válido. "
-                f"Esperado: 0-{self.MAX_ADDRESS}, recebido: {start}"
+                f"Esperado: 0-{self.ENDERECO_MAXIMO}, recebido: {inicio}"
             )
         
-        if end < 0 or end > self.MAX_ADDRESS:
+        if fim < 0 or fim > self.ENDERECO_MAXIMO:
             raise ValueError(
                 f"Endereço final fora do range válido. "
-                f"Esperado: 0-{self.MAX_ADDRESS}, recebido: {end}"
+                f"Esperado: 0-{self.ENDERECO_MAXIMO}, recebido: {fim}"
             )
         
-        if start > end:
+        if inicio > fim:
             raise ValueError(
                 f"Endereço inicial não pode ser maior que o final. "
-                f"start: {start}, end: {end}"
+                f"inicio: {inicio}, fim: {fim}"
             )
         
         # Cria dicionário com o dump da memória
-        return {address: self.memory[address] for address in range(start, end + 1)}
+        return {endereco: self.memoria[endereco] for endereco in range(inicio, fim + 1)}
     
-    def clear(self):
+    def limpar(self):
         """
         Limpa toda a memória, zerando todos os endereços.
         """
-        self.memory = [0] * self.MEMORY_SIZE
+        self.memoria = [0] * self.TAMANHO_MEMORIA
     
     def __str__(self) -> str:
         """
@@ -180,11 +180,11 @@ class Memory:
         Returns:
             String com informações básicas da memória
         """
-        non_zero_count = sum(1 for value in self.memory if value != 0)
+        enderecos_nao_zero = sum(1 for valor in self.memoria if valor != 0)
         return (
-            f"Memory(size={self.MEMORY_SIZE} words, "
-            f"word_size={self.WORD_SIZE} bits, "
-            f"non_zero_addresses={non_zero_count})"
+            f"Memoria(tamanho={self.TAMANHO_MEMORIA} palavras, "
+            f"tamanho_palavra={self.TAMANHO_PALAVRA} bits, "
+            f"enderecos_nao_zero={enderecos_nao_zero})"
         )
     
     def __repr__(self) -> str:
