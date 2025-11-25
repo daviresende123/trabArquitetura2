@@ -105,6 +105,134 @@ class Processor:
         self.ciclos = 0
         self.instrucoes = 0
     
+    def _stage_if(self) -> dict:
+        """
+        Estágio IF (Instruction Fetch) - Busca de Instrução.
+        
+        Operações realizadas:
+        1. Busca instrução da memória no endereço apontado por PC
+        2. Armazena instrução no registrador IR (Instruction Register)
+        3. Incrementa PC para apontar para próxima instrução
+        
+        Returns:
+            dict com informações do estágio IF:
+            {
+                'stage': 'IF',
+                'pc': int,          # Valor do PC antes do incremento
+                'ir': int,          # Instrução buscada
+                'instruction': int  # Mesma instrução (para compatibilidade)
+            }
+            
+        Raises:
+            ValueError: Se PC estiver fora do range válido da memória
+        """
+        # Guarda PC atual antes de incrementar
+        pc_atual = self.pc
+        
+        # 1. Busca instrução da memória no endereço PC
+        instrucao = self.memoria.ler(self.pc)
+        
+        # 2. Armazena instrução no registrador IR
+        self.ir = instrucao
+        
+        # 3. Incrementa PC (próxima instrução)
+        # O PC pode ser modificado posteriormente por instruções de jump/branch
+        self.pc = (self.pc + 1) & 0xFFFF  # Mantém PC em 16 bits
+        
+        return {
+            'stage': 'IF',
+            'pc': pc_atual,
+            'ir': self.ir,
+            'instruction': instrucao
+        }
+    
+    def _stage_id(self) -> dict:
+        """
+        Estágio ID (Instruction Decode) - Decodificação de Instrução.
+        
+        Operações realizadas:
+        1. Decodifica instrução armazenada em IR
+        2. Gera sinais de controle baseados na instrução
+        3. Lê operandos do banco de registradores (se necessário)
+        
+        Returns:
+            dict com informações do estágio ID:
+            {
+                'stage': 'ID',
+                'decoded': dict,           # Instrução decodificada
+                'control_signals': dict,   # Sinais de controle gerados
+                'operand_a': int,          # Valor do primeiro operando (se aplicável)
+                'operand_b': int           # Valor do segundo operando (se aplicável)
+            }
+            
+        Note:
+            - Para instruções tipo R: operand_a = reg[rb], operand_b = reg[rc]
+            - Para instruções tipo I (LW/SW): operand_a = reg[ra]
+            - Para instruções tipo B: operand_a = reg[ra], operand_b = reg[rb]
+            - Para outras instruções: operandos podem ser None
+        """
+        # 1. Decodifica instrução do IR
+        instrucao_decodificada = self.decoder.decodificar(self.ir)
+        
+        # 2. Gera sinais de controle
+        sinais_controle = self.controle.obter_sinais_controle(instrucao_decodificada)
+        
+        # 3. Lê operandos do banco de registradores
+        operando_a = None
+        operando_b = None
+        
+        tipo_instrucao = instrucao_decodificada['type']
+        
+        if tipo_instrucao == 'R':
+            # Instruções tipo R (ALU): lê rb e rc
+            # operand_a = valor de rb, operand_b = valor de rc
+            rb = instrucao_decodificada.get('rb')
+            rc = instrucao_decodificada.get('rc')
+            
+            if rb is not None:
+                operando_a = self.registradores.ler(rb)
+            if rc is not None:
+                operando_b = self.registradores.ler(rc)
+                
+        elif tipo_instrucao == 'I':
+            # Instruções tipo I: lê ra
+            ra = instrucao_decodificada.get('ra')
+            
+            # Para LW: ra é destino, mas precisamos ler para calcular endereço se necessário
+            # Para SW: ra é fonte (valor a armazenar)
+            # Para LOADH/LOADL: ra é destino, pode precisar do valor atual
+            if ra is not None:
+                operando_a = self.registradores.ler(ra)
+                
+            # Para LOADH/LOADL, o operando_b será o imediato (tratado no estágio EX)
+            
+        elif tipo_instrucao == 'B':
+            # Instruções tipo B (Branch): lê ra e rb para comparação
+            ra = instrucao_decodificada.get('ra')
+            rb = instrucao_decodificada.get('rb')
+            
+            if ra is not None:
+                operando_a = self.registradores.ler(ra)
+            if rb is not None:
+                operando_b = self.registradores.ler(rb)
+                
+        elif tipo_instrucao == 'JR':
+            # Jump Register: lê rc (registrador com endereço de destino)
+            rc = instrucao_decodificada.get('rc')
+            
+            if rc is not None:
+                operando_a = self.registradores.ler(rc)
+                
+        # Para tipo 'J' (Jump) e 'HALT': não precisam ler registradores
+        
+        return {
+            'stage': 'ID',
+            'decoded': instrucao_decodificada,
+            'control_signals': sinais_controle,
+            'operand_a': operando_a,
+            'operand_b': operando_b
+        }
+    
     def executar(self, max_ciclos: int = 10000, verboso: bool = False) -> dict:
         """
         Executa programa até HALT ou max_ciclos.
