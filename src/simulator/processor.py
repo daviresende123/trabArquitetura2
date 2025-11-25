@@ -233,6 +233,146 @@ class Processor:
             'operand_b': operando_b
         }
     
+    def _stage_ex_mem(self, decoded: dict, control_signals: dict,
+                      operand_a: int, operand_b: int) -> dict:
+        """
+        Estágio EX/MEM (Execute and Memory) - Execução e Acesso à Memória.
+        
+        Operações realizadas:
+        1. Executa operação na ALU (se instrução ALU)
+        2. Calcula endereço efetivo (para LW/SW)
+        3. Acessa memória (LW para leitura, SW para escrita)
+        4. Resolve branches (JEQ/JNE)
+        5. Calcula endereço de jump
+        6. Atualiza flags
+        
+        Args:
+            decoded: Instrução decodificada (do estágio ID)
+            control_signals: Sinais de controle (do estágio ID)
+            operand_a: Primeiro operando (do estágio ID)
+            operand_b: Segundo operando (do estágio ID)
+            
+        Returns:
+            dict com informações do estágio EX/MEM:
+            {
+                'stage': 'EX/MEM',
+                'result': int,           # Resultado da ALU ou valor lido da memória
+                'mem_address': int,      # Endereço de memória acessado (se aplicável)
+                'branch_taken': bool,    # True se branch foi tomado
+                'jump_address': int      # Endereço de destino do jump (se aplicável)
+            }
+        """
+        resultado = None
+        endereco_memoria = None
+        branch_tomado = False
+        endereco_jump = None
+        
+        opcode = decoded['opcode']
+        tipo = decoded['type']
+        
+        # 1. Execução de operações ALU
+        if control_signals['alu_op'] is not None:
+            # Instrução usa ALU
+            alu_op = control_signals['alu_op']
+            
+            # Determina operandos da ALU
+            op_a = operand_a if operand_a is not None else 0
+            op_b = operand_b if operand_b is not None else 0
+            
+            # Executa operação na ALU
+            resultado, carry, overflow = self.alu.executar(alu_op, op_a, op_b)
+            
+            # Atualiza flags
+            self.flags.atualizar_flags(resultado, carry, overflow)
+        
+        # 2. Instruções de Load/Store (LW/SW)
+        if control_signals['mem_read'] or control_signals['mem_write']:
+            # Calcula endereço efetivo: base (operand_a) + deslocamento (immediate)
+            # Para LW: operand_a geralmente é 0 ou base, immediate é o endereço
+            # Para SW: similar
+            imediato = decoded.get('immediate', 0)
+            
+            # Endereço efetivo (considerando que immediate já é o endereço direto)
+            endereco_memoria = imediato & 0xFFFF  # Mantém em 16 bits
+            
+            if control_signals['mem_read']:
+                # LW: Lê palavra da memória
+                resultado = self.memoria.ler(endereco_memoria)
+                
+            elif control_signals['mem_write']:
+                # SW: Escreve palavra na memória
+                # O valor a ser escrito está no registrador ra
+                ra = decoded.get('ra')
+                if ra is not None:
+                    valor_escrever = self.registradores.ler(ra)
+                    self.memoria.escrever(endereco_memoria, valor_escrever)
+        
+        # 3. Instruções LOADH e LOADL
+        if opcode == 0x0E:  # LOADH
+            # Carrega 16 bits nos 2 bytes mais significativos
+            imediato = decoded.get('immediate', 0)
+            # Mantém os 16 bits menos significativos do valor atual
+            valor_atual = operand_a if operand_a is not None else 0
+            baixos = valor_atual & 0x0000FFFF
+            # Coloca immediate nos bits altos
+            resultado = ((imediato & 0xFFFF) << 16) | baixos
+            
+        elif opcode == 0x0F:  # LOADL
+            # Carrega 16 bits nos 2 bytes menos significativos
+            imediato = decoded.get('immediate', 0)
+            # Mantém os 16 bits mais significativos do valor atual
+            valor_atual = operand_a if operand_a is not None else 0
+            altos = valor_atual & 0xFFFF0000
+            # Coloca immediate nos bits baixos
+            resultado = altos | (imediato & 0xFFFF)
+        
+        # 4. Instruções de Branch (JEQ, JNE)
+        if control_signals['branch']:
+            # Compara operandos
+            op_a = operand_a if operand_a is not None else 0
+            op_b = operand_b if operand_b is not None else 0
+            
+            if opcode == 0x14:  # JEQ (Jump if Equal)
+                branch_tomado = (op_a == op_b)
+            elif opcode == 0x15:  # JNE (Jump if Not Equal)
+                branch_tomado = (op_a != op_b)
+            
+            if branch_tomado:
+                # Atualiza PC: PC = PC + offset
+                offset = decoded.get('offset', 0)
+                # PC já foi incrementado no estágio IF, então:
+                # PC_novo = PC_atual + offset
+                self.pc = (self.pc + offset) & 0xFFFF
+        
+        # 5. Instruções de Jump (JAL, JR, J)
+        if control_signals['jump']:
+            if opcode == 0x13:  # JR (Jump Register)
+                # Jump para endereço no registrador rc
+                endereco_jump = operand_a & 0xFFFF if operand_a is not None else 0
+                
+            elif opcode == 0x12:  # JAL (Jump and Link)
+                # Salva PC+1 em R31 (será feito no estágio WB)
+                # Obtém endereço de destino
+                endereco_jump = decoded.get('address', 0)
+                # O resultado será o PC atual (já incrementado) para salvar em R31
+                resultado = self.pc
+                
+            elif opcode == 0x16:  # J (Jump incondicional)
+                # Jump para endereço absoluto
+                endereco_jump = decoded.get('address', 0)
+            
+            # Atualiza PC para o endereço de jump
+            if endereco_jump is not None:
+                self.pc = endereco_jump & 0xFFFF
+        
+        return {
+            'stage': 'EX/MEM',
+            'result': resultado,
+            'mem_address': endereco_memoria,
+            'branch_taken': branch_tomado,
+            'jump_address': endereco_jump
+        }
+    
     def executar(self, max_ciclos: int = 10000, verboso: bool = False) -> dict:
         """
         Executa programa até HALT ou max_ciclos.
