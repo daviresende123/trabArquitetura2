@@ -3,8 +3,8 @@ Módulo Processor para o simulador UFLA-RISC.
 Integra todos os componentes e implementa os 4 estágios de execução.
 """
 
-from .memory import Memoria
-from .registers import Registradores
+from .memoria import Memoria
+from .registradores import Registradores
 from .alu import ALU
 from .flags import Flags
 from .decoder import Decoder
@@ -549,66 +549,129 @@ class Processor:
             'flags': self.flags.dump()
         }
     
+    def _imprimir_estado(self, resultado_passo: dict):
+        """
+        Imprime estado do processador de forma legível.
+        
+        Args:
+            resultado_passo: Dicionário retornado pelo método passo()
+        """
+        print(f"\n{'=' * 80}")
+        print(f"CICLO {resultado_passo['cycle_count']} | INSTRUÇÃO {resultado_passo['instruction_count']}")
+        print(f"{'=' * 80}")
+        
+        # Informações básicas
+        print(f"PC: {resultado_passo['pc']} (0x{resultado_passo['pc']:04X})")
+        print(f"IR: 0x{resultado_passo['ir']:08X}")
+        
+        # Instrução decodificada
+        decoded = resultado_passo['decoded']
+        print(f"\nInstrução: {decoded['type']}")
+        if decoded['type'] != 'HALT':
+            print(f"  Opcode: 0x{decoded['opcode']:02X}")
+            if 'ra' in decoded:
+                print(f"  ra: R{decoded['ra']}")
+            if 'rb' in decoded:
+                print(f"  rb: R{decoded['rb']}")
+            if 'rc' in decoded:
+                print(f"  rc: R{decoded['rc']}")
+            if 'immediate' in decoded:
+                print(f"  immediate: {decoded['immediate']} (0x{decoded['immediate']:04X})")
+            if 'address' in decoded:
+                print(f"  address: {decoded['address']} (0x{decoded['address']:04X})")
+            if 'offset' in decoded:
+                print(f"  offset: {decoded['offset']}")
+        
+        # Registradores modificados
+        if resultado_passo['registers_modified']:
+            print("\nRegistradores modificados:")
+            for reg, valor in resultado_passo['registers_modified'].items():
+                print(f"  R{reg:2d} = {valor:10d} (0x{valor:08X})")
+        
+        # Memória modificada
+        if resultado_passo['memory_modified']:
+            print("\nMemória modificada:")
+            for endereco, valor in resultado_passo['memory_modified'].items():
+                print(f"  MEM[{endereco:5d}] = {valor:10d} (0x{valor:08X})")
+        
+        # Flags
+        flags = resultado_passo['flags']
+        print(f"\nFlags: N={int(flags['neg'])} Z={int(flags['zero'])} " +
+              f"C={int(flags['carry'])} V={int(flags['overflow'])}")
+        
+        # Status
+        if resultado_passo['halted']:
+            print("\n*** HALT ***")
+    
     def executar(self, max_ciclos: int = 10000, verboso: bool = False) -> dict:
         """
         Executa programa até HALT ou max_ciclos.
         
         Args:
             max_ciclos: Número máximo de ciclos a executar (padrão: 10000)
-            verboso: Se True, imprime informações de debug durante execução
+            verboso: Se True, imprime estado após cada instrução
             
         Returns:
             dict com estatísticas da execução:
             {
-                'ciclos': int,
-                'instrucoes': int,
                 'halted': bool,
-                'pc_final': int,
-                'registradores': dict,
-                'flags': dict,
-                'motivo_parada': str  # 'HALT' ou 'MAX_CICLOS'
+                'instruction_count': int,
+                'cycle_count': int,
+                'final_registers': dict,
+                'final_memory': dict,
+                'execution_log': list[dict],
+                'stop_reason': str  # 'HALT' ou 'MAX_CYCLES'
             }
         """
-        motivo_parada = None
+        # Inicializa log de execução
+        log_execucao = []
         
+        # Loop principal de execução
         while not self.halted and self.ciclos < max_ciclos:
             try:
-                info_ciclo = self.passo()
+                # Executa um passo (uma instrução completa)
+                resultado = self.passo()
                 
+                # Adiciona ao log
+                log_execucao.append(resultado)
+                
+                # Imprime estado se modo verboso
                 if verboso:
-                    print(f"\n=== Ciclo {info_ciclo['cycle_count']} ===")
-                    print(f"PC: {info_ciclo['pc']}")
-                    print(f"IR: 0x{info_ciclo['ir']:08X}")
-                    print(f"Instrução: {info_ciclo['decoded']}")
-                    
-                    if info_ciclo['registers_modified']:
-                        print("Registradores modificados:")
-                        for reg, val in info_ciclo['registers_modified'].items():
-                            print(f"  R{reg} = {val} (0x{val:08X})")
-                    
-                    if info_ciclo['memory_modified']:
-                        print("Memória modificada:")
-                        for addr, val in info_ciclo['memory_modified'].items():
-                            print(f"  MEM[{addr}] = {val} (0x{val:08X})")
-                    
-                    print(f"Flags: {info_ciclo['flags']}")
+                    self._imprimir_estado(resultado)
                 
-            except RuntimeError:
+            except RuntimeError as e:
+                # Processador já está em HALT
+                if verboso:
+                    print(f"\n{e}")
                 break
+            except Exception as e:
+                # Outro erro durante execução
+                if verboso:
+                    print(f"\nErro durante execução: {e}")
+                raise
         
+        # Determina motivo da parada
         if self.halted:
             motivo_parada = 'HALT'
         else:
-            motivo_parada = 'MAX_CICLOS'
+            motivo_parada = 'MAX_CYCLES'
         
+        # Obtém estado final da memória (apenas endereços não-zero)
+        memoria_final = {}
+        for endereco in range(self.memoria.TAMANHO_MEMORIA):
+            valor = self.memoria.ler(endereco)
+            if valor != 0:
+                memoria_final[endereco] = valor
+        
+        # Retorna estatísticas completas
         return {
-            'ciclos': self.ciclos,
-            'instrucoes': self.instrucoes,
             'halted': self.halted,
-            'pc_final': self.pc,
-            'registradores': self.registradores.dump(),
-            'flags': self.flags.dump(),
-            'motivo_parada': motivo_parada
+            'instruction_count': self.instrucoes,
+            'cycle_count': self.ciclos,
+            'final_registers': self.registradores.dump(),
+            'final_memory': memoria_final,
+            'execution_log': log_execucao,
+            'stop_reason': motivo_parada
         }
     
     def obter_estado(self) -> dict:
