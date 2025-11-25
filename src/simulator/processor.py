@@ -3,8 +3,8 @@ Módulo Processor para o simulador UFLA-RISC.
 Integra todos os componentes e implementa os 4 estágios de execução.
 """
 
-from .memoria import Memoria
-from .registradores import Registradores
+from .memory import Memoria
+from .registers import Registradores
 from .alu import ALU
 from .flags import Flags
 from .decoder import Decoder
@@ -373,6 +373,182 @@ class Processor:
             'jump_address': endereco_jump
         }
     
+    def _stage_wb(self, decoded: dict, control_signals: dict, result: int) -> dict:
+        """
+        Estágio WB (Write Back) - Escrita de Resultado.
+        
+        Operações realizadas:
+        1. Escreve resultado no registrador destino (se reg_write=True)
+        2. Para JAL, escreve PC de retorno em R31
+        
+        Args:
+            decoded: Instrução decodificada
+            control_signals: Sinais de controle
+            result: Resultado a ser escrito (do estágio EX/MEM)
+            
+        Returns:
+            dict com informações do estágio WB:
+            {
+                'stage': 'WB',
+                'register': int,  # Número do registrador escrito (ou None)
+                'value': int      # Valor escrito (ou None)
+            }
+        """
+        registrador_destino = None
+        valor_escrito = None
+        
+        # Verifica se deve escrever em registrador
+        if control_signals['reg_write'] and result is not None:
+            opcode = decoded['opcode']
+            
+            # Determina registrador de destino
+            if opcode == 0x12:  # JAL (Jump and Link)
+                # JAL salva endereço de retorno em R31
+                registrador_destino = 31
+                valor_escrito = result
+                
+            elif decoded['type'] == 'R':
+                # Instruções tipo R: escreve em ra
+                registrador_destino = decoded.get('ra')
+                valor_escrito = result
+                
+            elif decoded['type'] == 'I':
+                # Instruções tipo I: escreve em ra
+                registrador_destino = decoded.get('ra')
+                valor_escrito = result
+            
+            # Escreve no registrador destino
+            if registrador_destino is not None:
+                self.registradores.escrever(registrador_destino, valor_escrito)
+        
+        return {
+            'stage': 'WB',
+            'register': registrador_destino,
+            'value': valor_escrito
+        }
+    
+    def passo(self) -> dict:
+        """
+        Executa uma instrução completa (4 estágios).
+        
+        Executa os 4 estágios do pipeline:
+        1. IF (Instruction Fetch): Busca instrução na memória
+        2. ID (Instruction Decode): Decodifica instrução
+        3. EX/MEM (Execute and Memory): Executa operação e acessa memória
+        4. WB (Write Back): Escreve resultado
+        
+        Returns:
+            dict com informações completas do ciclo:
+            {
+                'instruction_count': int,
+                'cycle_count': int,
+                'pc': int,
+                'ir': int,
+                'decoded': dict,
+                'halted': bool,
+                'stages': {
+                    'IF': dict,
+                    'ID': dict,
+                    'EX/MEM': dict,
+                    'WB': dict
+                },
+                'registers_modified': dict,  # {num_reg: novo_valor}
+                'memory_modified': dict,     # {endereco: novo_valor}
+                'flags': dict
+            }
+            
+        Raises:
+            RuntimeError: Se tentar executar quando já está em HALT
+        """
+        if self.halted:
+            raise RuntimeError("Processador já executou HALT. Use resetar() para reiniciar.")
+        
+        # Guarda estado inicial dos registradores para detectar modificações
+        registradores_antes = self.registradores.dump()
+        
+        # === ESTÁGIO 1: IF (Instruction Fetch) ===
+        info_if = self._stage_if()
+        
+        # Verifica se é instrução HALT
+        if self.ir == 0xFFFFFFFF:
+            self.halted = True
+            self.ciclos += 1
+            self.instrucoes += 1
+            
+            return {
+                'instruction_count': self.instrucoes,
+                'cycle_count': self.ciclos,
+                'pc': info_if['pc'],
+                'ir': self.ir,
+                'decoded': {'opcode': 0xFFFFFFFF, 'type': 'HALT'},
+                'halted': True,
+                'stages': {
+                    'IF': info_if,
+                    'ID': {'stage': 'ID', 'decoded': {'type': 'HALT'}},
+                    'EX/MEM': {'stage': 'EX/MEM'},
+                    'WB': {'stage': 'WB'}
+                },
+                'registers_modified': {},
+                'memory_modified': {},
+                'flags': self.flags.dump()
+            }
+        
+        # === ESTÁGIO 2: ID (Instruction Decode) ===
+        info_id = self._stage_id()
+        
+        # === ESTÁGIO 3: EX/MEM (Execute and Memory) ===
+        info_ex_mem = self._stage_ex_mem(
+            info_id['decoded'],
+            info_id['control_signals'],
+            info_id['operand_a'],
+            info_id['operand_b']
+        )
+        
+        # Detecta modificações na memória
+        memoria_modificada = {}
+        if info_ex_mem['mem_address'] is not None and info_id['control_signals']['mem_write']:
+            endereco = info_ex_mem['mem_address']
+            valor = self.memoria.ler(endereco)
+            memoria_modificada[endereco] = valor
+        
+        # === ESTÁGIO 4: WB (Write Back) ===
+        info_wb = self._stage_wb(
+            info_id['decoded'],
+            info_id['control_signals'],
+            info_ex_mem['result']
+        )
+        
+        # Detecta registradores modificados
+        registradores_modificados = {}
+        registradores_depois = self.registradores.dump()
+        
+        for num_reg in range(32):
+            if registradores_antes[num_reg] != registradores_depois[num_reg]:
+                registradores_modificados[num_reg] = registradores_depois[num_reg]
+        
+        # Incrementa contadores
+        self.ciclos += 1
+        self.instrucoes += 1
+        
+        # Retorna informações completas do ciclo
+        return {
+            'instruction_count': self.instrucoes,
+            'cycle_count': self.ciclos,
+            'pc': info_if['pc'],
+            'ir': self.ir,
+            'decoded': info_id['decoded'],
+            'halted': self.halted,
+            'stages': {
+                'IF': info_if,
+                'ID': info_id,
+                'EX/MEM': info_ex_mem,
+                'WB': info_wb
+            },
+            'registers_modified': registradores_modificados,
+            'memory_modified': memoria_modificada,
+            'flags': self.flags.dump()
+        }
+    
     def executar(self, max_ciclos: int = 10000, verboso: bool = False) -> dict:
         """
         Executa programa até HALT ou max_ciclos.
@@ -389,35 +565,51 @@ class Processor:
                 'halted': bool,
                 'pc_final': int,
                 'registradores': dict,
-                'flags': dict
+                'flags': dict,
+                'motivo_parada': str  # 'HALT' ou 'MAX_CICLOS'
             }
         """
-        # TODO: Implementar em breve
-        pass
-    
-    def passo(self) -> dict:
-        """
-        Executa uma instrução completa (4 estágios).
+        motivo_parada = None
         
-        Estágios:
-        1. IF (Instruction Fetch): Busca instrução na memória
-        2. ID (Instruction Decode): Decodifica instrução
-        3. EX/MEM (Execute and Memory): Executa operação e acessa memória
-        4. WB (Write Back): Escreve resultado
+        while not self.halted and self.ciclos < max_ciclos:
+            try:
+                info_ciclo = self.passo()
+                
+                if verboso:
+                    print(f"\n=== Ciclo {info_ciclo['cycle_count']} ===")
+                    print(f"PC: {info_ciclo['pc']}")
+                    print(f"IR: 0x{info_ciclo['ir']:08X}")
+                    print(f"Instrução: {info_ciclo['decoded']}")
+                    
+                    if info_ciclo['registers_modified']:
+                        print("Registradores modificados:")
+                        for reg, val in info_ciclo['registers_modified'].items():
+                            print(f"  R{reg} = {val} (0x{val:08X})")
+                    
+                    if info_ciclo['memory_modified']:
+                        print("Memória modificada:")
+                        for addr, val in info_ciclo['memory_modified'].items():
+                            print(f"  MEM[{addr}] = {val} (0x{val:08X})")
+                    
+                    print(f"Flags: {info_ciclo['flags']}")
+                
+            except RuntimeError:
+                break
         
-        Returns:
-            dict com informações do ciclo:
-            {
-                'pc': int,
-                'ir': int,
-                'instrucao_decodificada': dict,
-                'registradores_modificados': dict,
-                'memoria_modificada': dict,
-                'flags': dict
-            }
-        """
-        # TODO: Implementar em breve
-        pass
+        if self.halted:
+            motivo_parada = 'HALT'
+        else:
+            motivo_parada = 'MAX_CICLOS'
+        
+        return {
+            'ciclos': self.ciclos,
+            'instrucoes': self.instrucoes,
+            'halted': self.halted,
+            'pc_final': self.pc,
+            'registradores': self.registradores.dump(),
+            'flags': self.flags.dump(),
+            'motivo_parada': motivo_parada
+        }
     
     def obter_estado(self) -> dict:
         """
